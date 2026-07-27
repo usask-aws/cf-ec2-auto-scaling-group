@@ -1,0 +1,114 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Auto Scaling Group using parameterized VPC, subnets, security groups, IAM instance profile, and latest Amazon Linux AMI
+
+Parameters:
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+  InstanceType:
+    Type: String
+    Default: t2.micro
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+
+  InstanceProfileName:
+    Type: String
+    Default: DefaultEC2InstanceProfile
+
+  MinSize:
+    Type: String
+    Default: '1'
+
+  MaxSize:
+    Type: String
+    Default: '1'
+
+  DesiredCapacity:
+    Type: String
+    Default: '1'
+
+  KeyPairName:
+    Description: 'Optional: Select an existing EC2 Key Pair to enable SSH access'
+    Type: 'String'
+    Default: ""
+
+  LaunchTemplateName:
+    Description: Name of the EC2 launch template
+    Type: 'String'
+    Default: EC2-Launch-Template
+
+  AutoScalingGroupName:
+    Description: Name of the EC2 auto scaling group
+    Type: 'String'
+    Default: EC2-ASG
+
+  EC2Name:
+    Description: Name of the EC2 instance
+    Type: 'String'
+    Default: EC2-Instance
+
+Conditions:
+  HasKeyPair: !Not [ !Equals [ !Ref KeyPairName, "" ] ]
+  
+Resources:
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Ref LaunchTemplateName
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              Encrypted: true
+        MetadataOptions:
+          HttpTokens: required       # Enforce IMDSv2, required by CIS
+          HttpPutResponseHopLimit: 2 # Adjust hop limit if needed
+          HttpEndpoint: enabled      
+        IamInstanceProfile:
+          Name: !Ref InstanceProfileName
+        SecurityGroupIds: !Ref SecurityGroupIds
+        KeyName: !If 
+          - HasKeyPair
+          - !Ref KeyPairName
+          - !Ref AWS::NoValue
+        Monitoring:
+          Enabled: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Ref EC2Name
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroupName
+      VPCZoneIdentifier: !Ref SubnetIds
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Ref EC2Name
+          PropagateAtLaunch: true
+
+
+Outputs:
+  LaunchTemplateId:
+    Value: !Ref LaunchTemplate
+
+  AutoScalingGroupName:
+    Value: !Ref AutoScalingGroup
